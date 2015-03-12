@@ -46,7 +46,6 @@ void ReadWord(char *word, FILE *fin) {
 
 int main(int argc, char **argv) {
   FILE *f;
-  char *bestw[N];
   char file_name[max_size], output_file[max_size];
   float len;
   long long words, size, a, b, c, d;
@@ -73,7 +72,6 @@ int main(int argc, char **argv) {
   ReadWord(word, f);
   size = atoi(word);
   vocab = (char *)malloc((long long)words * max_w * sizeof(char));
-  for (a = 0; a < N; a++) bestw[a] = (char *)malloc(max_size * sizeof(char));
   M = (float *)malloc((long long)words * (long long)size * sizeof(float));
   if (M == NULL) {
     printf("Cannot allocate memory: %lld MB    %lld  %lld\n", (long long)words * size * sizeof(float) / 1048576, words, size);
