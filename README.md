@@ -5,7 +5,7 @@ To build the code, simply run:
 make
 
 The command to build word embeddings is exactly the same as in the original version, except that we removed the argument -cbow and replaced it with the argument -type:
-./word2vec -train ../word2vec/text8 -output a -type 0 -size 50 -window 5 -negative 10 -hs 0 -sample 1e-4 -threads 1 -binary 1 -iter 
+./word2vec -train ../word2vec/text8 -output a -type 0 -size 50 -window 5 -negative 10 -hs 0 -sample 1e-4 -threads 1 -binary 1 -iter 5
 
 The -type argument is a integer that defines the architecture to use. These are the possible parameters:
 0 - cbow
