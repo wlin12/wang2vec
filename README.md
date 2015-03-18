@@ -53,6 +53,7 @@ A satirical
 where each line defines a class and a word belonging to that class. For words belonging to the class, negative sampling is only performed on words on that class. For instance, if the desired output is dog, we would only sample from cat and worm. For words not in the list, sampling is performed over all word types.
 
 warning: the file must be order so that all words in the same class are grouped, so the following would not work correctly.
+
 N dog  
 A charming  
 N cat  
