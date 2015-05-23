@@ -99,7 +99,7 @@ void printStates(real*states, int start){
 }
 
 void lstmForwardBlock(real *chars, int char_start, real*states, int next_start, int p){
-	int i,s,si,sf,sc,sct,sh,sctt,so,s1=next_start;	
+	int i,s,si,sf,sc,sct,sctt,so,s1=next_start;	
 	int prev_cell_start = s1 - c_state_size*4;
 	int prev_state_start = s1 - c_state_size;
 	if(states[prev_cell_start]==0){
@@ -231,7 +231,6 @@ void lstmForwardBlock(real *chars, int char_start, real*states, int next_start, 
 	}
 	
 	//next state
-	sh = s1;
 	if(states[s1]!=0){
 		printf("crap! end not zero\n");
 	}
@@ -245,7 +244,7 @@ void lstmForwardBlock(real *chars, int char_start, real*states, int next_start, 
 
 void lstmBackwardBlock(real *chars, int char_start, real*states, int next_start, int pStart, real*chars_e, real*states_e, real*lstm_params_e){
 	int p=pStart+c_lstm_params_number-1;
-	int i,s,si,sf,sc,sct,sh,sctt,so,s1=next_start+c_state_size*7-1;
+	int i,s,si,sf,sc,sct,sctt,so,s1=next_start+c_state_size*7-1;
 	int prev_cell_start = next_start - c_state_size*4;
 	int prev_state_start = next_start - c_state_size;
 
@@ -256,7 +255,6 @@ void lstmBackwardBlock(real *chars, int char_start, real*states, int next_start,
 	sc = next_start + c_state_size*3;
 	so = next_start + c_state_size*4;
 	sctt = next_start + c_state_size*5;
-	sh = next_start + c_state_size*6;
 	
 	//next state 
 	for(s = c_state_size-1; s >= 0; s--){
@@ -407,7 +405,7 @@ void lstmForward(char* word, int len, real* out, real *f_states, real *b_states,
 }
 
 void lstmBackward(char* word, int len, real* out, real *f_states, real *b_states, real* chars, real* out_e, real *f_states_e, real *b_states_e, real* chars_e, real *lstm_params_e){
-	int i,s,c,p;
+	int i,s,c=-1,p;
 	for(s = 0; s < (len+1)*c_state_size*7; s++){
 		f_states_e[s]=0;
 		b_states_e[s]=0;
@@ -1231,6 +1229,8 @@ void *TrainModelThread(void *id) {
         	lstmForward(c_last_word, strlen(c_last_word),neu1, f_states, b_states, chars);
         }        
         else{
+            if (last_word == -1) continue;
+	        l1 = last_word * layer1_size;
         	for (c = 0; c < layer1_size; c++) neu1[c] += syn0[c + l1];
         }
 	window_offset = a * layer1_size;
