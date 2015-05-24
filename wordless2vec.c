@@ -1282,6 +1282,7 @@ void *TrainModelThread(void *id) {
         last_word = sen[c];
         char* c_last_word = &c_sen[c*MAX_STRING];
         if(rep == 1){
+            if (last_word == -1) continue;
         	lstmForward(c_last_word, strlen(c_last_word),neu1, f_states, b_states, chars);
         } 
         else if(rep == 2){
