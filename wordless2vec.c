@@ -1323,6 +1323,7 @@ void *TrainModelThread(void *id) {
 
           for (c = 0; c < layer1_size; c++) neu1e[c] += g * syn1neg_window[c + l2 + window_offset];
           for (c = 0; c < layer1_size; c++) syn1neg_window[c + l2 + window_offset] += g * neu1[c];
+          
         }
         // Learn weights input -> hidden
         
@@ -1346,7 +1347,7 @@ void *TrainModelThread(void *id) {
         	long skip_prob = vocab[last_word].cn-(log(vocab[last_word].cn)+1);
             next_random = next_random * (unsigned long long)25214903917 + 11;
 			
-        	if(skip_prob < next_random%vocab[last_word].cn){
+        	if(last_word%num_threads == id && skip_prob < next_random%vocab[last_word].cn){
         		non_skip++;
         		if(in_mem == 0){
         			lstmForward(c_last_word, strlen(c_last_word),neu1, f_states, b_states, chars);        			
@@ -1362,10 +1363,10 @@ void *TrainModelThread(void *id) {
         	}
        		global_divergence = global_divergence*0.9 + g*0.1;
         }
+      }
         else{
         	for (c = 0; c < layer1_size; c++) syn0[c + l1] += neu1e[c];
         }
-      }
     }
     else if(type == 4){ //training senna
 	// in -> hidden
