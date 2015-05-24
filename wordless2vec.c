@@ -1363,10 +1363,11 @@ void *TrainModelThread(void *id) {
         	}
        		global_divergence = global_divergence*0.9 + g*0.1;
         }
-      }
         else{
         	for (c = 0; c < layer1_size; c++) syn0[c + l1] += neu1e[c];
         }
+
+      }
     }
     else if(type == 4){ //training senna
 	// in -> hidden
