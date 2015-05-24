@@ -442,7 +442,7 @@ void lstmBackward(char* word, int len, real* out, real *f_states, real *b_states
 	for(i = len-1; i >=0; i--){
 		lstmBackwardBlock(chars, (len-i-1)*c_proj_size, f_states, (i+1)*c_state_size*7, 0, chars_e,f_states_e,lstm_params_e);
 	}
-
+	
 	for(i = 0; i < len; i++){
 		c = word[i];
 		if(c>=C_MAX_CODE){c=C_MAX_CODE-1;}
@@ -467,6 +467,36 @@ void lstmBackward(char* word, int len, real* out, real *f_states, real *b_states
 	//printf("err\n");
 	//printStates(f_states_e,(len)*c_state_size*7);
 
+}
+
+void lstmFitting(char* word, int len, real* out, real *f_states, real *b_states, real* chars, real* out_expected, real* out_e, real *f_states_e, real *b_states_e, real* chars_e, real *lstm_params_e){
+	int i;
+	real g = 0;
+	lstmForward(word, len, out, f_states, b_states, chars);	
+	for(i = 0; i < layer1_size; i++){
+		if(out_expected[i]>out[i]){
+			g += out_expected[i]-out[i];		
+		}
+		else{
+			g += -out_expected[i]+out[i];		
+		}
+		out_e[i] = (out_expected[i]-out[i])*alpha;
+	}
+	printf("error before fitting = %f\n", g);
+	lstmBackward(word, len, out, f_states, b_states, chars, out_e, f_states_e, b_states_e, chars_e, lstm_params_e);
+	lstmForward(word, len, out, f_states, b_states, chars);	
+	g=0;
+	for(i = 0; i < layer1_size; i++){
+		if(out_expected[i]>out[i]){
+			g += out_expected[i]-out[i];		
+		}
+		else{
+			g += -out_expected[i]+out[i];		
+		}
+		out_e[i] = (out_expected[i]-out[i])*alpha;
+	}
+	printf("error after fitting = %f\n", g);
+	
 }
 
 real hardTanh(real x){
@@ -928,7 +958,7 @@ void InitNet() {
 
   for (a = 0; a < c_params_number; a++){
     next_random = next_random * (unsigned long long)25214903917 + 11;
-    f_b_params[a] = (((next_random & 0xFFFF) / (real)65536) - 0.5) / (c_state_size+c_cell_size+c_proj_size);
+    f_b_params[a] = (((next_random & 0xFFFF) / (real)65536) - 0.5) ;
   }
   }
   
@@ -1350,12 +1380,11 @@ void *TrainModelThread(void *id) {
         	if(last_word%num_threads == id && skip_prob < next_random%vocab[last_word].cn){
         		non_skip++;
         		if(in_mem == 0){
-        			lstmForward(c_last_word, strlen(c_last_word),neu1, f_states, b_states, chars);        			
-        			for (c = 0; c < layer1_size; c++) {
-	        			neu1e[c] = (syn0[c + l1] - neu1[c]) * alpha;
-	        		}
-        		}        		
-	        	lstmBackward(c_last_word, strlen(c_last_word),neu1, f_states, b_states, chars, neu1e,f_states_e, b_states_e, chars_e, lstm_params_e);	        	
+        			lstmFitting(c_last_word, strlen(c_last_word),neu1, f_states, b_states, chars,&syn0[c +l1], neu1e,f_states_e, b_states_e, chars_e, lstm_params_e);
+        		}
+        		else{    		
+	        		lstmBackward(c_last_word, strlen(c_last_word),neu1, f_states, b_states, chars, neu1e,f_states_e, b_states_e, chars_e, lstm_params_e);	        	
+	        	}
             	syn0_in_memory[last_word]=-1;
         	}
         	else{
