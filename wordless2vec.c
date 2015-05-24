@@ -76,8 +76,11 @@ real *f_init_state;
 real *f_init_cell;
 real *b_init_state;
 real *b_init_cell;
-
 real *f_b_params;
+
+//short term memory
+real*syn0_initial;
+real*syn0_in_memory;
 
 void printStates(real*states, int start){
 	int s;
@@ -376,6 +379,7 @@ void lstmForward(char* word, int len, real* out, real *f_states, real *b_states,
 	}
 	for(i = 0; i < len; i++){
 		c = word[i];
+		if(c>=C_MAX_CODE){c=C_MAX_CODE-1;}
 		for(s = 0; s < c_proj_size; s++){
 			chars[i*c_proj_size+s] = c_lookup[c*c_proj_size+s];
 		}
@@ -441,6 +445,7 @@ void lstmBackward(char* word, int len, real* out, real *f_states, real *b_states
 
 	for(i = 0; i < len; i++){
 		c = word[i];
+		if(c>=C_MAX_CODE){c=C_MAX_CODE-1;}
 		for(s = 0; s < c_proj_size; s++){
 			c_lookup[c*c_proj_size+s] += chars_e[i*c_proj_size+s];
 		}
@@ -884,6 +889,7 @@ void InitNet() {
     syn_window_hidden[a] = (((next_random & 0xFFFF) / (real)65536) - 0.5) / (window_hidden_size*window_layer_size);
   }
   
+  if(rep == 1 || rep == 2){
   a = posix_memalign((void **)&c_lookup, 128, (long long)C_MAX_CODE * c_proj_size * sizeof(real));
   if (c_lookup == NULL) {printf("Memory allocation failed\n"); exit(1);}
   for (a = 0; a < C_MAX_CODE * c_proj_size; a++){
@@ -924,7 +930,17 @@ void InitNet() {
     next_random = next_random * (unsigned long long)25214903917 + 11;
     f_b_params[a] = (((next_random & 0xFFFF) / (real)65536) - 0.5) / (c_state_size+c_cell_size+c_proj_size);
   }
-
+  }
+  
+  if(rep == 2){
+  	  a = posix_memalign((void **)&syn0_initial, 128, (long long)vocab_size * layer1_size * sizeof(real));
+    if (syn0_initial == NULL) {printf("Memory allocation failed\n"); exit(1);}
+  	  a = posix_memalign((void **)&syn0_in_memory, 128, (long long)vocab_size * sizeof(real));
+	if (syn0_in_memory == NULL) {printf("Memory allocation failed\n"); exit(1);}
+	for(a = 0; a < vocab_size; a++){
+		syn0_in_memory[a] = -1;
+	}
+  }
   CreateBinaryTree();
 }
 
@@ -961,6 +977,11 @@ void *TrainModelThread(void *id) {
   real *chars_e = (real *)calloc(c_proj_size * MAX_STRING, sizeof(real));
   real *lstm_params_e = (real *)calloc(c_lstm_params_number*2, sizeof(real));
   
+  //short term memory vars
+  real global_divergence = -1;
+  int in_mem = 0;
+  int skip=0, non_skip=0;
+  
   while (1) {
     if (word_count - last_word_count > 10000) {
       word_count_actual += word_count - last_word_count;
@@ -970,7 +991,12 @@ void *TrainModelThread(void *id) {
         printf("%cAlpha: %f  Progress: %.2f%%  Words/thread/sec: %.2fk : error %.4f", 13, alpha,
          word_count_actual / (real)(iter * train_words + 1) * 100,
          word_count_actual / ((real)(now - start + 1) / (real)CLOCKS_PER_SEC * 1000), acc_g);
+         if(rep == 2){
+         	printf(" skiprate %f",skip/(real)(skip+non_skip));
+         }
          acc_g=0;
+         skip=0;
+         non_skip=0;
         fflush(stdout);
       }
       alpha = starting_alpha * (1 - word_count_actual / (real)(iter * train_words + 1));
@@ -1227,7 +1253,20 @@ void *TrainModelThread(void *id) {
         char* c_last_word = &c_sen[c*MAX_STRING];
         if(rep == 1){
         	lstmForward(c_last_word, strlen(c_last_word),neu1, f_states, b_states, chars);
-        }        
+        } 
+        else if(rep == 2){
+            if (last_word == -1) continue;
+            if(syn0_in_memory[last_word]==-1){
+            	syn0_in_memory[last_word]=0;
+        		lstmForward(c_last_word, strlen(c_last_word),&syn0_initial[l1], f_states, b_states, chars);
+	        	for (c = 0; c < layer1_size; c++) {syn0[c + l1] = syn0_initial[c + l1];neu1[c] += syn0[c + l1];}
+	        	in_mem = 1;
+        	}
+        	else{
+	        	for (c = 0; c < layer1_size; c++) neu1[c] += syn0[c + l1];
+	        	in_mem = 0;	        	
+        	}
+        }
         else{
             if (last_word == -1) continue;
 	        l1 = last_word * layer1_size;
@@ -1289,6 +1328,39 @@ void *TrainModelThread(void *id) {
         
         if(rep == 1){
         	lstmBackward(c_last_word, strlen(c_last_word),neu1, f_states, b_states, chars, neu1e,f_states_e, b_states_e, chars_e, lstm_params_e);
+        }
+        else if(rep == 2){
+        	g = 0;
+        	for (c = 0; c < layer1_size; c++) {
+        		syn0[c + l1] += neu1e[c];
+        		f = syn0[c + l1] - syn0_initial[c + l1];
+        		if(f > 0){
+        			g+=f;
+        		}
+        		else{
+        			g-=f;
+        		}
+        	}
+        	syn0_in_memory[last_word] = g;
+        	if(global_divergence == -1){global_divergence = g;}
+        	long skip_prob = vocab[last_word].cn-(log(vocab[last_word].cn)+1);
+            next_random = next_random * (unsigned long long)25214903917 + 11;
+			
+        	if(skip_prob < next_random%vocab[last_word].cn){
+        		non_skip++;
+        		if(in_mem == 0){
+        			lstmForward(c_last_word, strlen(c_last_word),neu1, f_states, b_states, chars);        			
+        			for (c = 0; c < layer1_size; c++) {
+	        			neu1e[c] = (syn0[c + l1] - neu1[c]) * alpha;
+	        		}
+        		}        		
+	        	lstmBackward(c_last_word, strlen(c_last_word),neu1, f_states, b_states, chars, neu1e,f_states_e, b_states_e, chars_e, lstm_params_e);	        	
+            	syn0_in_memory[last_word]=-1;
+        	}
+        	else{
+        		skip++;
+        	}
+       		global_divergence = global_divergence*0.9 + g*0.1;
         }
         else{
         	for (c = 0; c < layer1_size; c++) syn0[c + l1] += neu1e[c];
@@ -1423,7 +1495,7 @@ void TrainModel() {
     fprintf(fo, "%lld %lld\n", vocab_size, layer1_size);
     for (a = 0; a < vocab_size; a++) {
       fprintf(fo, "%s ", vocab[a].word);
-      if(rep==1){
+      if(rep == 1 || rep == 2){
       	lstmForward(vocab[a].word, strlen(vocab[a].word),neu1, f_states,b_states,chars);
         if (binary) for (b = 0; b < layer1_size; b++) fwrite(&neu1[b], sizeof(real), 1, fo);
         else for (b = 0; b < layer1_size; b++) fprintf(fo, "%lf ", neu1[b]);
@@ -1536,7 +1608,7 @@ int main(int argc, char **argv) {
     printf("\t-type <int>\n");
     printf("\t\tType of embeddings (0 for cbow, 1 for skipngram, 2 for cwindow, 3 for structured skipngram, 4 for senna type)\n");
     printf("\t-rep <int>\n");
-    printf("\t\tType of word rep (0 for word, 1 for character\n");
+    printf("\t\tType of word rep (0 for word, 1 for character, 2 for character with short term memory\n");
     printf("\t-char-state-dim <int>\n");
     printf("\t\tcharacter state size\n");
     printf("\t-char-proj-dim <int>\n");
