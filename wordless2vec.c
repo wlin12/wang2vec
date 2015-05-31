@@ -1277,22 +1277,15 @@ void *TrainModelThread(void *id) {
       }
     }
     else if (type == 3){  //train structured skip-gram
-      for (a = 0; a < window * 2 + 1; a++) if (a != window) {
-        c = sentence_position - window + a;
-        if (c < 0) continue;
-        if (c >= sentence_length) continue;
-        last_word = sen[c];
-        char* c_last_word = &c_sen[c*MAX_STRING];
-        if(rep == 1){
-            if (last_word == -1) continue;
-        	lstmForward(c_last_word, strlen(c_last_word),neu1, f_states, b_states, chars);
+       char* c_word = &c_sen[sentence_position*MAX_STRING];
+       if(rep == 1){
+        	lstmForward(c_word, strlen(c_word),neu1, f_states, b_states, chars);
         } 
         else if(rep == 2){
-            if (last_word == -1) continue;
-	        l1 = last_word * layer1_size;
-            if(syn0_in_memory[last_word]==-1){
-            	syn0_in_memory[last_word]=0;
-        		lstmForward(c_last_word, strlen(c_last_word),&syn0_initial[l1], f_states, b_states, chars);
+	        l1 = word * layer1_size;
+            if(syn0_in_memory[word]==-1){
+            	syn0_in_memory[word]=0;
+        		lstmForward(c_word, strlen(c_word),&syn0_initial[l1], f_states, b_states, chars);
 	        	for (c = 0; c < layer1_size; c++) {syn0[c + l1] = syn0_initial[c + l1];neu1[c] += syn0[c + l1];}
 	        	in_mem = 1;
         	}
@@ -1302,24 +1295,32 @@ void *TrainModelThread(void *id) {
         	}
         }
         else{
-            if (last_word == -1) continue;
-	        l1 = last_word * layer1_size;
-        	for (c = 0; c < layer1_size; c++) neu1[c] += syn0[c + l1];
+        	l1 = word * layer1_size;
+	        for (c = 0; c < layer1_size; c++) neu1[c] += syn0[c + l1];
         }
+        
+      for (a = 0; a < window * 2 + 1; a++) if (a != window) {
+        c = sentence_position - window + a;
+        if (c < 0) continue;
+        if (c >= sentence_length) continue;
+        last_word = sen[c];
+        if (last_word == -1) continue;
+
+        
 	window_offset = a * layer1_size;
 	if(a > window) window_offset -= layer1_size;
         for (c = 0; c < layer1_size; c++) neu1e[c] = 0;
         // HIERARCHICAL SOFTMAX
-        if (hs) for (d = 0; d < vocab[word].codelen; d++) {
+        if (hs) for (d = 0; d < vocab[last_word].codelen; d++) {
           f = 0;
-          l2 = vocab[word].point[d] * window_layer_size;
+          l2 = vocab[last_word].point[d] * window_layer_size;
           // Propagate hidden -> output
           for (c = 0; c < layer1_size; c++) f += neu1[c] * syn1_window[c + l2 + window_offset];
           if (f <= -MAX_EXP) continue;
           else if (f >= MAX_EXP) continue;
           else f = expTable[(int)((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))];
           // 'g' is the gradient multiplied by the learning rate
-          g = (1 - vocab[word].code[d] - f) * alpha;
+          g = (1 - vocab[last_word].code[d] - f) * alpha;
           // Propagate errors output -> hidden
           for (c = 0; c < layer1_size; c++) neu1e[c] += g * syn1_window[c + l2 + window_offset];
           // Learn weights hidden -> output
@@ -1328,14 +1329,14 @@ void *TrainModelThread(void *id) {
         // NEGATIVE SAMPLING
         if (negative > 0) for (d = 0; d < negative + 1; d++) {
           if (d == 0) {
-            target = word;
+            target = last_word;
             label = 1;
           } else {
 	     next_random = next_random * (unsigned long long)25214903917 + 11;
-            if(word_to_group != NULL && word_to_group[word] != -1){
-                target = word;
-                while(target == word) {
-                        target = group_to_table[word_to_group[word]*table_size + (next_random >> 16) % table_size];
+            if(word_to_group != NULL && word_to_group[last_word] != -1){
+                target = last_word;
+                while(target == last_word) {
+                        target = group_to_table[word_to_group[last_word]*table_size + (next_random >> 16) % table_size];
                         next_random = next_random * (unsigned long long)25214903917 + 11;
                 }
                 //printf("negative sampling %lld for word %s returned %s\n", d, vocab[word].word, vocab[target].word);
@@ -1344,7 +1345,7 @@ void *TrainModelThread(void *id) {
                 target = table[(next_random >> 16) % table_size];
             }
             if (target == 0) target = next_random % (vocab_size - 1) + 1;
-            if (target == word) continue;
+            if (target == last_word) continue;
             label = 0;
           }
           l2 = target * window_layer_size;
@@ -1359,14 +1360,16 @@ void *TrainModelThread(void *id) {
           for (c = 0; c < layer1_size; c++) syn1neg_window[c + l2 + window_offset] += g * neu1[c];
           
         }
-        // Learn weights input -> hidden
+        
+      }
+      // Learn weights input -> hidden
         
         if(rep == 1){
-        	lstmBackward(c_last_word, strlen(c_last_word),neu1, f_states, b_states, chars, neu1e,f_states_e, b_states_e, chars_e, lstm_params_e);
+        	lstmBackward(c_word, strlen(c_word),neu1, f_states, b_states, chars, neu1e,f_states_e, b_states_e, chars_e, lstm_params_e);
         }
         else if(rep == 2){
         	g = 0;
-	        l1 = last_word * layer1_size;
+	        l1 = word * layer1_size;
         	for (c = 0; c < layer1_size; c++) {
         		syn0[c + l1] += neu1e[c];
         		f = syn0[c + l1] - syn0_initial[c + l1];
@@ -1377,20 +1380,20 @@ void *TrainModelThread(void *id) {
         			g-=f;
         		}
         	}
-        	syn0_in_memory[last_word] = g;
+        	syn0_in_memory[word] = g;
         	if(global_divergence == -1){global_divergence = g;}
-        	long skip_prob = vocab[last_word].cn-(log(vocab[last_word].cn)+1);
+        	long skip_prob = vocab[word].cn-(log(vocab[word].cn)+1);
             next_random = next_random * (unsigned long long)25214903917 + 11;
 			
-        	if(skip_prob < next_random%vocab[last_word].cn){
+        	if(skip_prob < next_random%vocab[word].cn){
         		non_skip++;
         		if(in_mem == 0){
-        			lstmFitting(c_last_word, strlen(c_last_word),neu1, f_states, b_states, chars,&syn0[c +l1], neu1e,f_states_e, b_states_e, chars_e, lstm_params_e);
+        			lstmFitting(c_word, strlen(c_word),neu1, f_states, b_states, chars,&syn0[c +l1], neu1e,f_states_e, b_states_e, chars_e, lstm_params_e);
         		}
         		else{    		
-	        		lstmBackward(c_last_word, strlen(c_last_word),neu1, f_states, b_states, chars, neu1e,f_states_e, b_states_e, chars_e, lstm_params_e);	        	
+	        		lstmBackward(c_word, strlen(c_word),neu1, f_states, b_states, chars, neu1e,f_states_e, b_states_e, chars_e, lstm_params_e);	        	
 	        	}
-            	syn0_in_memory[last_word]=-1;
+            	syn0_in_memory[word]=-1;
         	}
         	else{
         		skip++;
@@ -1398,11 +1401,9 @@ void *TrainModelThread(void *id) {
        		global_divergence = global_divergence*0.9 + g*0.1;
         }
         else{
-   	        l1 = last_word * layer1_size;
+   	        l1 = word * layer1_size;
         	for (c = 0; c < layer1_size; c++) syn0[c + l1] += neu1e[c];
         }
-
-      }
     }
     else if(type == 4){ //training senna
 	// in -> hidden
@@ -1533,6 +1534,7 @@ void TrainModel() {
     for (a = 0; a < vocab_size; a++) {
       fprintf(fo, "%s ", vocab[a].word);
       if(rep == 1 || rep == 2){
+      	for (b = 0; b < layer1_size; b++) {neu1[b]=0;}
       	lstmForward(vocab[a].word, strlen(vocab[a].word),neu1, f_states,b_states,chars);
         if (binary) for (b = 0; b < layer1_size; b++) fwrite(&neu1[b], sizeof(real), 1, fo);
         else for (b = 0; b < layer1_size; b++) fprintf(fo, "%lf ", neu1[b]);
