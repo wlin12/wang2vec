@@ -82,6 +82,8 @@ real *f_b_params;
 real*syn0_initial;
 real*syn0_in_memory;
 
+int batch_size = 100;
+
 void printStates(real*states, int start){
 	int s;
 	printf("igate ");	
@@ -1287,6 +1289,7 @@ void *TrainModelThread(void *id) {
         } 
         else if(rep == 2){
             if (last_word == -1) continue;
+	        l1 = last_word * layer1_size;
             if(syn0_in_memory[last_word]==-1){
             	syn0_in_memory[last_word]=0;
         		lstmForward(c_last_word, strlen(c_last_word),&syn0_initial[l1], f_states, b_states, chars);
