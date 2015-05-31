@@ -461,7 +461,7 @@ void lstmBackward(char* word, int len, real* out, real *f_states, real *b_states
 	for(s = 0; s < c_lstm_params_number*2; s++){
 		f_b_params[c]+=lstm_params_e[c];
 	}
-	
+		
 	//printf("out\n");
 	//printStates(f_states,(len)*c_state_size*7);
 	//printf("err\n");
@@ -1378,7 +1378,7 @@ void *TrainModelThread(void *id) {
         	long skip_prob = vocab[last_word].cn-(log(vocab[last_word].cn)+1);
             next_random = next_random * (unsigned long long)25214903917 + 11;
 			
-        	if(last_word%num_threads == id && skip_prob < next_random%vocab[last_word].cn){
+        	if(skip_prob < next_random%vocab[last_word].cn){
         		non_skip++;
         		if(in_mem == 0){
         			lstmFitting(c_last_word, strlen(c_last_word),neu1, f_states, b_states, chars,&syn0[c +l1], neu1e,f_states_e, b_states_e, chars_e, lstm_params_e);
