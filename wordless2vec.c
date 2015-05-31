@@ -1366,6 +1366,7 @@ void *TrainModelThread(void *id) {
         }
         else if(rep == 2){
         	g = 0;
+	        l1 = last_word * layer1_size;
         	for (c = 0; c < layer1_size; c++) {
         		syn0[c + l1] += neu1e[c];
         		f = syn0[c + l1] - syn0_initial[c + l1];
@@ -1397,6 +1398,7 @@ void *TrainModelThread(void *id) {
        		global_divergence = global_divergence*0.9 + g*0.1;
         }
         else{
+   	        l1 = last_word * layer1_size;
         	for (c = 0; c < layer1_size; c++) syn0[c + l1] += neu1e[c];
         }
 
