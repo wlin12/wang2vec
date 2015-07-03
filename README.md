@@ -7,7 +7,7 @@ make
 
 The command to build word embeddings is exactly the same as in the original version, except that we removed the argument -cbow and replaced it with the argument -type:
 
-./word2vec -train <input_file> -output <output_file> -type 0 -size 50 -window 5 -negative 10 -hs 0 -sample 1e-4 -threads 1 -binary 1 -iter 5
+./word2vec -train <input_file> -output <output_file> -type 0 -size 50 -window 5 -negative 10 -nce -hs 0 -sample 1e-4 -threads 1 -binary 1 -iter 5 -cap 0
 
 The -type argument is a integer that defines the architecture to use. These are the possible parameters:  
 0 - cbow  
@@ -36,6 +36,14 @@ The two NN architectures cwindow and structured skipngram (aimed for solving syn
 These are described in our paper:
 
 -Two/Too Simple Adaptations of word2vec for Syntax Problems
+
+****** Noise Contrastive Estimation objective ******
+
+Noise contrastive estimation is another approximation for the word softmax objective function, in additon to Hierarchical softmax and negative sampling, which are implemented in the default word2vec toolkit. This can be turned on by setting the -nce argument. Simply set -nce 10, to use 10 negative samples. Also remember to set -negative and -hs to 0.
+
+****** Parameter Capping ******
+
+By default parameters are updated freely, and are not checked for overflows efficiency. However, we had some datasets where the CWINDOW architecture overflows, which leads to segfaults, If this happens, you can set the paramter -cap 1, in order to avoid this at the cost of a small degradation in computational speed.
 
 ****** Class-based Negative Sampling ******
 

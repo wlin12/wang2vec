@@ -42,14 +42,14 @@ int *vocab_hash;
 long long vocab_max_size = 1000, vocab_size = 0, layer1_size = 100;
 long long train_words = 0, word_count_actual = 0, iter = 5, file_size = 0, classes = 0;
 real alpha = 0.025, starting_alpha, sample = 1e-3;
-real *syn0, *syn1, *syn1neg, *expTable;
+real *syn0, *syn1, *syn1neg, *syn1nce, *expTable;
 clock_t start;
 
-real *syn1_window, *syn1neg_window;
+real *syn1_window, *syn1neg_window, *syn1nce_window;
 int window_offset, window_layer_size;
 
 int window_hidden_size = 500; 
-real *syn_window_hidden, *syn_hidden_word, *syn_hidden_word_neg; 
+real *syn_window_hidden, *syn_hidden_word, *syn_hidden_word_neg, *syn_hidden_word_nce; 
 
 int hs = 0, negative = 5;
 const int table_size = 1e8;
@@ -60,6 +60,21 @@ char negative_classes_file[MAX_STRING];
 int *word_to_group;
 int *group_to_table; //group_size*table_size
 int class_number;
+
+//nce
+real* noise_distribution;
+int nce = 10;
+
+//param caps
+real CAP_VALUE = 50;
+int cap = 0;
+
+void capParam(real* array, int index){
+	if(array[index] > CAP_VALUE) 
+		array[index] = CAP_VALUE;
+	else if(array[index] < -CAP_VALUE)
+		array[index] = -CAP_VALUE; 
+}
 
 real hardTanh(real x){
 	if(x>=1){
@@ -99,6 +114,9 @@ void InitUnigramTable() {
     }
     if (i >= vocab_size) i = vocab_size - 1;
   }
+  
+  noise_distribution = (real *)calloc(vocab_size, sizeof(real));
+  for (a = 0; a < vocab_size; a++) noise_distribution[a] = pow(vocab[a].cn, power)/(real)train_words_pow;
 }
 
 // Reads a single word from a file, assuming space + tab + EOL to be word boundaries
@@ -462,6 +480,21 @@ void InitNet() {
     for (a = 0; a < vocab_size; a++) for (b = 0; b < window_hidden_size; b++)
      syn_hidden_word_neg[a * window_hidden_size + b] = 0;
   }
+  if (nce>0) {
+    a = posix_memalign((void **)&syn1nce, 128, (long long)vocab_size * layer1_size * sizeof(real));
+    if (syn1nce == NULL) {printf("Memory allocation failed\n"); exit(1);}
+    a = posix_memalign((void **)&syn1nce_window, 128, (long long)vocab_size * window_layer_size * sizeof(real));
+    if (syn1nce_window == NULL) {printf("Memory allocation failed\n"); exit(1);}
+    a = posix_memalign((void **)&syn_hidden_word_nce, 128, (long long)vocab_size * window_hidden_size * sizeof(real));
+    if (syn_hidden_word_nce == NULL) {printf("Memory allocation failed\n"); exit(1);}
+
+    for (a = 0; a < vocab_size; a++) for (b = 0; b < layer1_size; b++)
+     syn1nce[a * layer1_size + b] = 0;
+    for (a = 0; a < vocab_size; a++) for (b = 0; b < window_layer_size; b++)
+     syn1nce_window[a * window_layer_size + b] = 0;
+    for (a = 0; a < vocab_size; a++) for (b = 0; b < window_hidden_size; b++)
+     syn_hidden_word_nce[a * window_hidden_size + b] = 0;
+  }
   for (a = 0; a < vocab_size; a++) for (b = 0; b < layer1_size; b++) {
     next_random = next_random * (unsigned long long)25214903917 + 11;
     syn0[a * layer1_size + b] = (((next_random & 0xFFFF) / (real)65536) - 0.5) / layer1_size;
@@ -579,6 +612,7 @@ void *TrainModelThread(void *id) {
           for (c = 0; c < layer1_size; c++) neu1e[c] += g * syn1[c + l2];
           // Learn weights hidden -> output
           for (c = 0; c < layer1_size; c++) syn1[c + l2] += g * neu1[c];
+	  if(cap == 1) for (c = 0; c < layer1_size; c++) capParam(syn1, c + l2);
         }
         // NEGATIVE SAMPLING
         if (negative > 0) for (d = 0; d < negative + 1; d++) {
@@ -610,6 +644,42 @@ void *TrainModelThread(void *id) {
           else g = (label - expTable[(int)((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))]) * alpha;
           for (c = 0; c < layer1_size; c++) neu1e[c] += g * syn1neg[c + l2];
           for (c = 0; c < layer1_size; c++) syn1neg[c + l2] += g * neu1[c];
+	  if (cap == 1) for (c = 0; c < layer1_size; c++) capParam(syn1neg, c + l2);
+        }
+        // Noise Contrastive Estimation
+        if (nce > 0) for (d = 0; d < nce + 1; d++) {
+          if (d == 0) {
+            target = word;
+            label = 1;
+          } else {
+            next_random = next_random * (unsigned long long)25214903917 + 11;
+	    if(word_to_group != NULL && word_to_group[word] != -1){
+		target = word;
+		while(target == word) {
+			target = group_to_table[word_to_group[word]*table_size + (next_random >> 16) % table_size];
+            		next_random = next_random * (unsigned long long)25214903917 + 11;
+		}
+	    }
+	    else{
+            	target = table[(next_random >> 16) % table_size];
+	    }
+            if (target == 0) target = next_random % (vocab_size - 1) + 1;
+            if (target == word) continue;
+            label = 0;
+          }
+          l2 = target * layer1_size;
+          f = 0;
+	  
+          for (c = 0; c < layer1_size; c++) f += neu1[c] * syn1nce[c + l2];
+          if (f > MAX_EXP) g = (label - 1) * alpha;
+          else if (f < -MAX_EXP) g = (label - 0) * alpha;
+          else {
+                f = exp(f);
+                g = (label - f/(noise_distribution[target]*nce + f)) * alpha;
+          }
+	  for (c = 0; c < layer1_size; c++) neu1e[c] += g * syn1nce[c + l2];
+          for (c = 0; c < layer1_size; c++) syn1nce[c + l2] += g * neu1[c];
+	  if(cap == 1) for (c = 0; c < layer1_size; c++) capParam(syn1nce,c + l2);
         }
         // hidden -> in
         for (a = b; a < window * 2 + 1 - b; a++) if (a != window) {
@@ -645,9 +715,10 @@ void *TrainModelThread(void *id) {
           for (c = 0; c < layer1_size; c++) neu1e[c] += g * syn1[c + l2];
           // Learn weights hidden -> output
           for (c = 0; c < layer1_size; c++) syn1[c + l2] += g * syn0[c + l1];
+	  if (cap == 1) for (c = 0; c < layer1_size; c++) capParam(syn1, c + l2);
         }
         // NEGATIVE SAMPLING
-        if (negative > 0) for (d = 0; d < negative + 1; d++) {
+	if (negative > 0) for (d = 0; d < negative + 1; d++) {
           if (d == 0) {
             target = word;
             label = 1;
@@ -676,6 +747,42 @@ void *TrainModelThread(void *id) {
           else g = (label - expTable[(int)((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))]) * alpha;
           for (c = 0; c < layer1_size; c++) neu1e[c] += g * syn1neg[c + l2];
           for (c = 0; c < layer1_size; c++) syn1neg[c + l2] += g * syn0[c + l1];
+	  if (cap == 1) for (c = 0; c < layer1_size; c++) capParam(syn1neg, c + l2);
+        }
+	//Noise Contrastive Estimation
+        if (nce > 0) for (d = 0; d < nce + 1; d++) {
+          if (d == 0) {
+            target = word;
+            label = 1;
+          } else {
+	    next_random = next_random * (unsigned long long)25214903917 + 11;
+            if(word_to_group != NULL && word_to_group[word] != -1){
+                target = word;
+                while(target == word) {
+                        target = group_to_table[word_to_group[word]*table_size + (next_random >> 16) % table_size];
+                        next_random = next_random * (unsigned long long)25214903917 + 11;
+                }
+                //printf("negative sampling %lld for word %s returned %s\n", d, vocab[word].word, vocab[target].word);
+            }
+            else{
+                target = table[(next_random >> 16) % table_size];
+            }
+            if (target == 0) target = next_random % (vocab_size - 1) + 1;
+            if (target == word) continue;
+            label = 0;
+          }
+          l2 = target * layer1_size;
+          f = 0;
+          for (c = 0; c < layer1_size; c++) f += syn0[c + l1] * syn1nce[c + l2];
+          if (f > MAX_EXP) g = (label - 1) * alpha;
+          else if (f < -MAX_EXP) g = (label - 0) * alpha;
+          else {
+                f = exp(f);
+                g = (label - f/(noise_distribution[target]*nce + f)) * alpha;
+          }
+          for (c = 0; c < layer1_size; c++) neu1e[c] += g * syn1nce[c + l2];
+          for (c = 0; c < layer1_size; c++) syn1nce[c + l2] += g * syn0[c + l1];
+	  if (cap == 1) for (c = 0; c < layer1_size; c++) capParam(syn1nce, c + l2);
         }
         // Learn weights input -> hidden
         for (c = 0; c < layer1_size; c++) syn0[c + l1] += neu1e[c];
@@ -710,6 +817,7 @@ void *TrainModelThread(void *id) {
           for (c = 0; c < window_layer_size; c++) neu1e[c] += g * syn1_window[c + l2];
           // Learn weights hidden -> output
           for (c = 0; c < window_layer_size; c++) syn1_window[c + l2] += g * neu1[c];
+	  if (cap == 1) for (c = 0; c < window_layer_size; c++) capParam(syn1_window, c + l2);
         }
         // NEGATIVE SAMPLING
         if (negative > 0) for (d = 0; d < negative + 1; d++) {
@@ -736,11 +844,47 @@ void *TrainModelThread(void *id) {
           l2 = target * window_layer_size;
           f = 0;
           for (c = 0; c < window_layer_size; c++) f += neu1[c] * syn1neg_window[c + l2];
-          if (f > MAX_EXP) g = (label - 1) * alpha;
+	  if (f > MAX_EXP) g = (label - 1) * alpha;
           else if (f < -MAX_EXP) g = (label - 0) * alpha;
           else g = (label - expTable[(int)((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))]) * alpha;
           for (c = 0; c < window_layer_size; c++) neu1e[c] += g * syn1neg_window[c + l2];
           for (c = 0; c < window_layer_size; c++) syn1neg_window[c + l2] += g * neu1[c];
+	  if(cap == 1) for (c = 0; c < window_layer_size; c++) capParam(syn1neg_window, c + l2);
+        }
+	// Noise Contrastive Estimation
+        if (nce > 0) for (d = 0; d < nce + 1; d++) {
+          if (d == 0) {
+            target = word;
+            label = 1;
+          } else {
+            next_random = next_random * (unsigned long long)25214903917 + 11;
+            if(word_to_group != NULL && word_to_group[word] != -1){
+                target = word;
+                while(target == word) {
+                        target = group_to_table[word_to_group[word]*table_size + (next_random >> 16) % table_size];
+                        next_random = next_random * (unsigned long long)25214903917 + 11;
+                }
+                //printf("negative sampling %lld for word %s returned %s\n", d, vocab[word].word, vocab[target].word);
+            }
+            else{
+                target = table[(next_random >> 16) % table_size];
+            }
+            if (target == 0) target = next_random % (vocab_size - 1) + 1;
+            if (target == word) continue;
+            label = 0;
+          }
+          l2 = target * window_layer_size;
+          f = 0;
+          for (c = 0; c < window_layer_size; c++) f += neu1[c] * syn1nce_window[c + l2];
+	  if (f > MAX_EXP) g = (label - 1) * alpha;
+          else if (f < -MAX_EXP) g = (label - 0) * alpha;
+          else {
+                f = exp(f);
+                g = (label - f/(noise_distribution[target]*nce + f)) * alpha;
+          }
+          for (c = 0; c < window_layer_size; c++) neu1e[c] += g * syn1nce_window[c + l2];
+          for (c = 0; c < window_layer_size; c++) syn1nce_window[c + l2] += g * neu1[c];
+	  if(cap == 1) for (c = 0; c < window_layer_size; c++) capParam(syn1nce_window, c + l2);
         }
         // hidden -> in
         for (a = 0; a < window * 2 + 1; a++) if (a != window) {
@@ -781,6 +925,7 @@ void *TrainModelThread(void *id) {
           for (c = 0; c < layer1_size; c++) neu1e[c] += g * syn1_window[c + l2 + window_offset];
           // Learn weights hidden -> output
           for (c = 0; c < layer1_size; c++) syn1[c + l2 + window_offset] += g * syn0[c + l1];
+	  if(cap == 1) for (c = 0; c < layer1_size; c++) capParam(syn1, c + l2 + window_offset);
         }
         // NEGATIVE SAMPLING
         if (negative > 0) for (d = 0; d < negative + 1; d++) {
@@ -807,14 +952,50 @@ void *TrainModelThread(void *id) {
           l2 = target * window_layer_size;
           f = 0;
           for (c = 0; c < layer1_size; c++) f += syn0[c + l1] * syn1neg_window[c + l2 + window_offset];
-          if (f > MAX_EXP) g = (label - 1) * alpha;
+	  if (f > MAX_EXP) g = (label - 1) * alpha;
           else if (f < -MAX_EXP) g = (label - 0) * alpha;
           else g = (label - expTable[(int)((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))]) * alpha;
-          for (c = 0; c < layer1_size; c++) neu1e[c] += g * syn1neg_window[c + l2 + window_offset];
-          for (c = 0; c < layer1_size; c++) syn1neg_window[c + l2 + window_offset] += g * syn0[c + l1];
+	  for (c = 0; c < layer1_size; c++) neu1e[c] += g * syn1neg_window[c + l2 + window_offset];
+          for (c = 0; c < layer1_size; c++) syn1neg_window[c + l2 + window_offset] += g * syn0[c + l1]; 
+	  if(cap == 1) for (c = 0; c < layer1_size; c++) capParam(syn1neg_window, c + l2 + window_offset);
+        }
+	// Noise Constrastive Estimation
+        if (nce > 0) for (d = 0; d < nce + 1; d++) {
+          if (d == 0) {
+            target = word;
+            label = 1;
+          } else {
+             next_random = next_random * (unsigned long long)25214903917 + 11;
+            if(word_to_group != NULL && word_to_group[word] != -1){
+                target = word;
+                while(target == word) {
+                        target = group_to_table[word_to_group[word]*table_size + (next_random >> 16) % table_size];
+                        next_random = next_random * (unsigned long long)25214903917 + 11;
+                }
+                //printf("negative sampling %lld for word %s returned %s\n", d, vocab[word].word, vocab[target].word);
+            }
+            else{
+                target = table[(next_random >> 16) % table_size];
+            }
+            if (target == 0) target = next_random % (vocab_size - 1) + 1;
+            if (target == word) continue;
+            label = 0;
+          }
+          l2 = target * window_layer_size;
+          f = 0;
+          for (c = 0; c < layer1_size; c++) f += syn0[c + l1] * syn1nce_window[c + l2 + window_offset];
+	  if (f > MAX_EXP) g = (label - 1) * alpha;
+          else if (f < -MAX_EXP) g = (label - 0) * alpha;
+          else {
+                f = exp(f);
+                g = (label - f/(noise_distribution[target]*nce + f)) * alpha;
+          }
+          for (c = 0; c < layer1_size; c++) neu1e[c] += g * syn1nce_window[c + l2 + window_offset];
+          for (c = 0; c < layer1_size; c++) syn1nce_window[c + l2 + window_offset] += g * syn0[c + l1];
+	  if (cap == 1) for (c = 0; c < layer1_size; c++) capParam(syn1nce_window, c + l2 + window_offset);
         }
         // Learn weights input -> hidden
-        for (c = 0; c < layer1_size; c++) syn0[c + l1] += neu1e[c];
+        for (c = 0; c < layer1_size; c++) {syn0[c + l1] += neu1e[c]; if(syn0[c + l1] > 50) syn0[c + l1] = 50; if(syn0[c + l1] < -50) syn0[c + l1] = -50;}
       }
     }
     else if(type == 4){ //training senna
@@ -929,7 +1110,7 @@ void TrainModel() {
   if (save_vocab_file[0] != 0) SaveVocab();
   if (output_file[0] == 0) return;
   InitNet();
-  if (negative > 0) InitUnigramTable();
+  if (negative > 0 || nce > 0) InitUnigramTable();
   if (negative_classes_file[0] != 0) InitClassUnigramTable();
   start = clock();
   for (a = 0; a < num_threads; a++) pthread_create(&pt[a], NULL, TrainModelThread, (void *)a);
@@ -1023,8 +1204,11 @@ int main(int argc, char **argv) {
     printf("\t-hs <int>\n");
     printf("\t\tUse Hierarchical Softmax; default is 0 (not used)\n");
     printf("\t-negative <int>\n");
-    printf("\t-negative-classes <file>\n");
     printf("\t\tNumber of negative examples; default is 5, common values are 3 - 10 (0 = not used)\n");
+    printf("\t-negative-classes <file>\n");
+    printf("\t\tNegative classes to sample from\n");
+    printf("\t-nce <int>\n");
+    printf("\t\tNumber of negative examples for nce; default is 5, common values are 3 - 10 (0 = not used)\n");
     printf("\t-threads <int>\n");
     printf("\t\tUse <int> threads (default 12)\n");
     printf("\t-iter <int>\n");
@@ -1045,6 +1229,8 @@ int main(int argc, char **argv) {
     printf("\t\tThe vocabulary will be read from <file>, not constructed from the training data\n");
     printf("\t-type <int>\n");
     printf("\t\tType of embeddings (0 for cbow, 1 for skipngram, 2 for cwindow, 3 for structured skipngram, 4 for senna type)\n");
+    printf("\t-cap <int>\n");
+    printf("\t\tlimit the parameter values to the range [-50, 50]; default is 0 (off)\n");
     printf("\nExamples:\n");
     printf("./word2vec -train data.txt -output vec.txt -size 200 -window 5 -sample 1e-4 -negative 5 -hs 0 -binary 0 -type 1 -iter 3\n\n");
     return 0;
@@ -1060,18 +1246,20 @@ int main(int argc, char **argv) {
   if ((i = ArgPos((char *)"-debug", argc, argv)) > 0) debug_mode = atoi(argv[i + 1]);
   if ((i = ArgPos((char *)"-binary", argc, argv)) > 0) binary = atoi(argv[i + 1]);
   if ((i = ArgPos((char *)"-type", argc, argv)) > 0) type = atoi(argv[i + 1]);
-  if (type==0 || type==2 || type==4) alpha = 0.05;
-  if ((i = ArgPos((char *)"-alpha", argc, argv)) > 0) alpha = atof(argv[i + 1]);
   if ((i = ArgPos((char *)"-output", argc, argv)) > 0) strcpy(output_file, argv[i + 1]);
   if ((i = ArgPos((char *)"-window", argc, argv)) > 0) window = atoi(argv[i + 1]);
   if ((i = ArgPos((char *)"-sample", argc, argv)) > 0) sample = atof(argv[i + 1]);
   if ((i = ArgPos((char *)"-hs", argc, argv)) > 0) hs = atoi(argv[i + 1]);
   if ((i = ArgPos((char *)"-negative", argc, argv)) > 0) negative = atoi(argv[i + 1]);
   if ((i = ArgPos((char *)"-negative-classes", argc, argv)) > 0) strcpy(negative_classes_file, argv[i + 1]);
+  if ((i = ArgPos((char *)"-nce", argc, argv)) > 0) nce = atoi(argv[i + 1]);
   if ((i = ArgPos((char *)"-threads", argc, argv)) > 0) num_threads = atoi(argv[i + 1]);
   if ((i = ArgPos((char *)"-iter", argc, argv)) > 0) iter = atoi(argv[i + 1]);
   if ((i = ArgPos((char *)"-min-count", argc, argv)) > 0) min_count = atoi(argv[i + 1]);
   if ((i = ArgPos((char *)"-classes", argc, argv)) > 0) classes = atoi(argv[i + 1]);
+  if ((i = ArgPos((char *)"-cap", argc, argv)) > 0) cap = atoi(argv[i + 1]);
+  if (type==0 || type==2 || type==4) alpha = 0.05;
+  if ((i = ArgPos((char *)"-alpha", argc, argv)) > 0) alpha = atof(argv[i + 1]);
   vocab = (struct vocab_word *)calloc(vocab_max_size, sizeof(struct vocab_word));
   vocab_hash = (int *)calloc(vocab_hash_size, sizeof(int));
   expTable = (real *)malloc((EXP_TABLE_SIZE + 1) * sizeof(real));
@@ -1082,3 +1270,4 @@ int main(int argc, char **argv) {
   TrainModel();
   return 0;
 }
+
