@@ -43,7 +43,7 @@ Noise contrastive estimation is another approximation for the word softmax objec
 
 ****** Parameter Capping ******
 
-By default parameters are updated freely, and are not checked for overflows efficiency. However, we had some datasets where the CWINDOW architecture overflows, which leads to segfaults, If this happens, you can set the paramter -cap 1, in order to avoid this at the cost of a small degradation in computational speed.
+By default parameters are updated freely, and are not checked for algebric overflows to maximize efficiency. However, we had some datasets where the CWINDOW architecture overflows, which leads to segfaults, If this happens, even in other architectures, try setting the paramter -cap 1 in order to avoid this problem at the cost of a small degradation in computational speed.
 
 ****** Class-based Negative Sampling ******
 
