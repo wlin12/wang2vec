@@ -518,7 +518,7 @@ void *TrainModelThread(void *id) {
   real f, g;
   clock_t now;
   int input_len_1 = layer1_size;
-  int window_offset = 0;
+  int window_offset = -1;
   if(type == 2 || type == 4){
      input_len_1=window_layer_size;
   }
