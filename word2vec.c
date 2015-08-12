@@ -46,7 +46,7 @@ real *syn0, *syn1, *syn1neg, *syn1nce, *expTable;
 clock_t start;
 
 real *syn1_window, *syn1neg_window, *syn1nce_window;
-int window_offset, window_layer_size;
+int w_offset, window_layer_size;
 
 int window_hidden_size = 500; 
 real *syn_window_hidden, *syn_hidden_word, *syn_hidden_word_neg, *syn_hidden_word_nce; 
@@ -518,6 +518,7 @@ void *TrainModelThread(void *id) {
   real f, g;
   clock_t now;
   int input_len_1 = layer1_size;
+  int window_offset = 0;
   if(type == 2 || type == 4){
      input_len_1=window_layer_size;
   }
