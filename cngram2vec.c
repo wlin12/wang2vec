@@ -72,13 +72,14 @@ int cap = 0;
 // char models
 char boundToken = 'Z';
 char *unkNgramToken = "ZZZ";
-int cngram_size = 4;
+int cngram_size = 6;
 real *syn0_cngram;
 long long cngram_vocab_size = 0;
 struct vocab_word *cngram_vocab;
 int *cngram_vocab_hash;
 long long cngram_vocab_max_size = 1000;
 char extra_vocab_file[MAX_STRING];
+long long maxNgramSize = 1000000;
 
 // Returns hash value of a word
 int GetWordHash(char *word) {
@@ -179,17 +180,17 @@ void BackwardCNgramWordRepresentation(real *output, char *word, real *output_err
         BackwardCNgramWordNgram(output, tmp, output_err);
 }
 
-void AddWordNgramToVocab(char *ngram){
+void AddWordNgramToVocab(char *ngram, int count){
 	int index = SearchCNgramVocab(ngram);
 	if(index != -1){
-		cngram_vocab[index].cn++;
+		cngram_vocab[index].cn+=count;
 		return;
 	}
         unsigned int hash, length = strlen(ngram) + 1;
         if (length > MAX_STRING) length = MAX_STRING;
         cngram_vocab[cngram_vocab_size].word = (char *)calloc(length, sizeof(char));
         strcpy(cngram_vocab[cngram_vocab_size].word, ngram);
-        cngram_vocab[cngram_vocab_size].cn = 1;
+        cngram_vocab[cngram_vocab_size].cn = count;
         cngram_vocab_size++;
         // Reallocate memory if needed
         if (cngram_vocab_size + 2 >= cngram_vocab_max_size) {
@@ -201,7 +202,7 @@ void AddWordNgramToVocab(char *ngram){
         cngram_vocab_hash[hash] = cngram_vocab_size - 1;
 }
 
-void AddAllWordNgramToVocab(char *word){
+void AddAllWordNgramToVocab(char *word, int count){
 	int length = strlen(word);
 	int start;
 	int cur_len;
@@ -211,11 +212,11 @@ void AddAllWordNgramToVocab(char *word){
 	for(start = 0; start < length-cngram_size+1; start++){
 		ngram = word + start;
 		strncpy(tmp, ngram, cngram_size);
-		AddWordNgramToVocab(tmp);
+		AddWordNgramToVocab(tmp, count);
 	}
 	for(cur_len = 0; cur_len < cngram_size-1; cur_len++) tmp[cur_len] = boundToken;
 	strncpy(tmp+1, word, cur_len);
-	AddWordNgramToVocab(tmp);
+	AddWordNgramToVocab(tmp, count);
 	for(cur_len = 0; cur_len < cngram_size-1; cur_len++) tmp[cngram_size-cur_len-1] = boundToken;
 	cur_len = cngram_size - 1;
 	if(length < cur_len){
@@ -225,8 +226,7 @@ void AddAllWordNgramToVocab(char *word){
 	strncpy(tmp, ngram, cur_len);
 	tmp[cur_len] = 'Z';
 	tmp[cur_len + 1] = '\0';
-	AddWordNgramToVocab(tmp);
-	
+	AddWordNgramToVocab(tmp, count);	
 }
 
 void capParam(real* array, int index){
@@ -476,7 +476,7 @@ void LearnVocabFromTrainFile() {
   }
   vocab_size = 0;
   AddWordToVocab((char *)"</s>");
-  AddWordNgramToVocab(unkNgramToken);
+  AddWordNgramToVocab(unkNgramToken,1000000);
   while (1) {
     ReadWord(word, fin);
     if (feof(fin)) break;
@@ -489,11 +489,13 @@ void LearnVocabFromTrainFile() {
     if (i == -1) {
       a = AddWordToVocab(word);
       vocab[a].cn = 1;
-      AddAllWordNgramToVocab(word);
     } else vocab[i].cn++;
     if (vocab_size > vocab_hash_size * 0.7) ReduceVocab();
   }
   SortVocab();
+  for (a = 0; a < vocab_size; a++){
+      AddAllWordNgramToVocab(vocab[a].word, vocab[a].cn);
+  }
   if (debug_mode > 0) {
     printf("Vocab size: %lld\n", vocab_size);
     printf("Ngrams size: %lld\n", cngram_vocab_size);
