@@ -63,7 +63,7 @@ int class_number;
 
 //nce
 real* noise_distribution;
-int nce = 10;
+int nce = 0;
 
 //param caps
 real CAP_VALUE = 50;
@@ -1209,7 +1209,7 @@ int main(int argc, char **argv) {
     printf("\t-negative-classes <file>\n");
     printf("\t\tNegative classes to sample from\n");
     printf("\t-nce <int>\n");
-    printf("\t\tNumber of negative examples for nce; default is 5, common values are 3 - 10 (0 = not used)\n");
+    printf("\t\tNumber of negative examples for nce; default is 0, common values are 3 - 10 (0 = not used)\n");
     printf("\t-threads <int>\n");
     printf("\t\tUse <int> threads (default 12)\n");
     printf("\t-iter <int>\n");
