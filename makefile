@@ -2,10 +2,12 @@ CC = gcc
 #Using -Ofast instead of -O3 might result in faster code, but is supported only by newer GCC versions
 CFLAGS = -lm -pthread -O3 -march=native -Wall -funroll-loops -Wno-unused-result -g
 
-all: word2vec cngram2vec wordless2vec word2phrase distance word-analogy compute-accuracy distance_txt distance_fast kmeans_txt
+all: word2vec cngram2vec weightedWord2vec wordless2vec word2phrase distance word-analogy compute-accuracy distance_txt distance_fast kmeans_txt
 
 word2vec : word2vec.c
 	$(CC) word2vec.c -o word2vec $(CFLAGS)
+weightedWord2vec : weightedWord2vec.c
+	$(CC) weightedWord2vec.c -o weightedWord2vec $(CFLAGS)
 cngram2vec : cngram2vec.c
 	$(CC) cngram2vec.c -o cngram2vec $(CFLAGS)
 wordless2vec : wordless2vec.c
@@ -25,4 +27,4 @@ word-analogy : word-analogy.c
 compute-accuracy : compute-accuracy.c
 	$(CC) compute-accuracy.c -o compute-accuracy $(CFLAGS)
 clean:
-	rm -rf word2vec cngram2vec wiord2phrase distance word-analogy compute-accuracy distance_txt kmeans_txt
+	rm -rf word2vec weightedWord2vec cngram2vec wiord2phrase distance word-analogy compute-accuracy distance_txt kmeans_txt
