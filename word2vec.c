@@ -925,7 +925,7 @@ void *TrainModelThread(void *id) {
           // Propagate errors output -> hidden
           for (c = 0; c < layer1_size; c++) neu1e[c] += g * syn1_window[c + l2 + window_offset];
           // Learn weights hidden -> output
-          for (c = 0; c < layer1_size; c++) syn1[c + l2 + window_offset] += g * syn0[c + l1];
+          for (c = 0; c < layer1_size; c++) syn1_window[c + l2 + window_offset] += g * syn0[c + l1];
 	  if(cap == 1) for (c = 0; c < layer1_size; c++) capParam(syn1, c + l2 + window_offset);
         }
         // NEGATIVE SAMPLING
