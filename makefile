@@ -27,4 +27,4 @@ word-analogy : word-analogy.c
 compute-accuracy : compute-accuracy.c
 	$(CC) compute-accuracy.c -o compute-accuracy $(CFLAGS)
 clean:
-	rm -rf word2vec weightedWord2vec cngram2vec wiord2phrase distance word-analogy compute-accuracy distance_txt kmeans_txt
+	rm -rf word2vec weightedWord2vec cngram2vec word2phrase distance word-analogy compute-accuracy distance_txt kmeans_txt
